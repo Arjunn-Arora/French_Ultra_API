@@ -1,0 +1,545 @@
+import express from "express";
+import axios from "axios";
+import dotenv from "dotenv";
+import FormData from "form-data";
+
+dotenv.config();
+const app = express();
+app.use(express.json());
+
+const {
+  ZOHO_CLIENT_ID,
+  ZOHO_CLIENT_SECRET,
+  ZOHO_REFRESH_TOKEN,
+  ZOHO_ORGANIZATION_ID,
+  ZOHO_TOKEN_URL
+} = process.env;
+
+/* ------------------------------------------------
+   1. Refresh Zoho Access Token
+------------------------------------------------ */
+const getAccessToken = async () => {
+  try {
+    const response = await axios.post(
+      `${ZOHO_TOKEN_URL}`,
+      null,
+      {
+        params: {
+          refresh_token: ZOHO_REFRESH_TOKEN,
+          client_id: ZOHO_CLIENT_ID,
+          client_secret: ZOHO_CLIENT_SECRET,
+          grant_type: "refresh_token"
+        }
+      }
+    );
+
+    return response.data.access_token;
+  } catch (error) {
+    console.error("❌ Error refreshing token:", error.response?.data || error.message);
+    throw error;
+  }
+};
+
+/* ------------------------------------------------
+   2. Create Customer
+------------------------------------------------ */
+app.post("/fr/create-customer", async (req, res) => {
+  try {
+    const accessToken = await getAccessToken();
+
+    /* -------- GET ZOHO CURRENCIES -------- */
+
+    const currencyResp = await axios.get(
+      "https://www.zohoapis.com/books/v3/settings/currencies",
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const currencies = currencyResp.data.currencies;
+
+    const currencyObj = currencies.find(
+      c => c.currency_code === req.body.currency
+    );
+
+    if (!currencyObj) {
+      return res.status(400).json({
+        error: `Currency ${req.body.currency} not found in Zoho`
+      });
+    }
+
+    const currency_id = currencyObj.currency_id;
+
+    const payment_terms = req.body.payment_terms ?? 30;
+    const payment_terms_label = req.body.payment_terms_label ?? "Net 30";
+
+    const response = await axios.post(
+      "https://www.zohoapis.com/books/v3/contacts",
+      {
+        contact_name: req.body.contact_name,
+        company_name: req.body.company_name,
+        contact_type: "customer",
+        currency_id: currency_id,
+        tax_treatment: req.body.tax_treatment,
+        payment_terms: payment_terms, // No. of Days
+        payment_terms_label: payment_terms_label, // Name of Payment Terms
+        place_of_contact: req.body.place_of_contact,
+        tax_reg_no: req.body.tax_reg_no,
+        vat_reg_no: req.body.vat_reg_no,
+        billing_address: {
+          address: req.body.billing_address?.address,
+          city: req.body.billing_address?.city,
+          zip: req.body.billing_address?.zip,
+          country: req.body.billing_address?.country,
+        },
+        contact_persons: [
+          {
+            first_name: req.body.contact_name,
+            email: req.body.email,
+            phone: req.body.phone,
+          }
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (error) {
+    console.error("❌ Create customer error:", error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to create customer" });
+  }
+});
+
+/* ------------------------------------------------
+   3. Create Vendor
+------------------------------------------------ */
+app.post("/fr/create-vendor", async (req, res) => {
+  try {
+    const accessToken = await getAccessToken();
+
+    /* -------- GET ZOHO CURRENCIES -------- */
+
+    const currencyResp = await axios.get(
+      "https://www.zohoapis.com/books/v3/settings/currencies",
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const currencies = currencyResp.data.currencies;
+
+    const currencyObj = currencies.find(
+      c => c.currency_code === req.body.currency
+    );
+
+    if (!currencyObj) {
+      return res.status(400).json({
+        error: `Currency ${req.body.currency} not found in Zoho`
+      });
+    }
+
+    const currency_id = currencyObj.currency_id;
+
+    const payment_terms = req.body.payment_terms ?? 30;
+    const payment_terms_label = req.body.payment_terms_label ?? "Net 30";
+
+    const response = await axios.post(
+      "https://www.zohoapis.com/books/v3/contacts",
+      {
+        contact_name: req.body.contact_name,
+        company_name: req.body.company_name,
+        contact_type: "vendor",
+        currency_id: currency_id,
+        payment_terms: payment_terms,
+        payment_terms_label: payment_terms_label,
+        tax_treatment: req.body.tax_treatment,
+        place_of_contact: req.body.place_of_contact,
+        tax_reg_no: req.body.tax_reg_no,
+        vat_reg_no: req.body.vat_reg_no,
+        country_code: req.body.country_code,
+        billing_address: {
+          address: req.body.billing_address?.address,
+          city: req.body.billing_address?.city,
+          zip: req.body.billing_address?.zip,
+          country: req.body.billing_address?.country,
+        },
+        contact_persons: [
+          {
+            first_name: req.body.contact_name,
+            email: req.body.email,
+            phone: req.body.phone,
+          }
+        ],
+      },
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (error) {
+    console.error("❌ Create vendor error:", error.response?.data || error.message);
+    res.status(500).json({ error: "Failed to create vendor" });
+  }
+});
+
+
+/*-------------------------------------------------
+    6. Update Customer
+-------------------------------------------------*/
+
+app.patch("/fr/update-customer", async (req, res) => {
+  try {
+
+    const accessToken = await getAccessToken();
+    const contact_id = req.body.contact_id;
+
+    if (!contact_id) {
+      return res.status(400).json({
+        error: "contact_id is required"
+      });
+    }
+
+    let updateData = {};
+
+    /* -------- GET EXISTING CONTACT (IMPORTANT) -------- */
+
+    const existingContactResp = await axios.get(
+      `https://www.zohoapis.com/books/v3/contacts/${contact_id}`,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const existingContact = existingContactResp.data.contact;
+
+    const existingContactPerson =
+      existingContact.contact_persons &&
+      existingContact.contact_persons.length > 0
+        ? existingContact.contact_persons[0]
+        : null;
+
+    /* -------- OPTIONAL CURRENCY LOOKUP -------- */
+
+    if (req.body.currency) {
+
+      const currencyResp = await axios.get(
+        "https://www.zohoapis.com/books/v3/settings/currencies",
+        {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`
+          },
+          params: {
+            organization_id: ZOHO_ORGANIZATION_ID
+          }
+        }
+      );
+
+      const currencies = currencyResp.data.currencies;
+
+      const currencyObj = currencies.find(
+        c => c.currency_code === req.body.currency
+      );
+
+      if (!currencyObj) {
+        return res.status(400).json({
+          error: `Currency ${req.body.currency} not found in Zoho`
+        });
+      }
+
+      updateData.currency_id = currencyObj.currency_id;
+    }
+
+    /* -------- OPTIONAL FIELDS -------- */
+
+    if (req.body.contact_name) {
+      updateData.contact_name = req.body.contact_name;
+    }
+
+    if (req.body.company_name) updateData.company_name = req.body.company_name;
+    if (req.body.tax_treatment) updateData.tax_treatment = req.body.tax_treatment;
+    if (req.body.place_of_contact) updateData.place_of_contact = req.body.place_of_contact;
+    if (req.body.tax_reg_no) updateData.tax_reg_no = req.body.tax_reg_no;
+    if (req.body.vat_reg_no) updateData.vat_reg_no = req.body.vat_reg_no;
+
+    /* -------- PAYMENT TERMS -------- */
+
+    if (req.body.payment_terms) updateData.payment_terms = req.body.payment_terms;
+    if (req.body.payment_terms_label) updateData.payment_terms_label = req.body.payment_terms_label;
+
+    /* -------- BILLING ADDRESS -------- */
+
+    if (req.body.billing_address) {
+      updateData.billing_address = {
+        address: req.body.billing_address.address,
+        city: req.body.billing_address.city,
+        zip: req.body.billing_address.zip,
+        country: req.body.billing_address.country
+      };
+    }
+
+    /* -------- CONTACT PERSON SAFE UPDATE -------- */
+
+    if (
+      req.body.contact_name ||
+      req.body.email ||
+      req.body.phone
+    ) {
+
+      updateData.contact_persons = [
+        {
+          contact_person_id: existingContactPerson?.contact_person_id,
+
+          first_name:
+            req.body.contact_name ||
+            existingContactPerson?.first_name ||
+            "",
+
+          email:
+            req.body.email ||
+            existingContactPerson?.email ||
+            "",
+
+          phone:
+            req.body.phone ||
+            existingContactPerson?.phone ||
+            ""
+        }
+      ];
+    }
+
+    /* -------- UPDATE CUSTOMER -------- */
+
+    const response = await axios.put(
+      `https://www.zohoapis.com/books/v3/contacts/${contact_id}`,
+      updateData,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (error) {
+
+    console.error(
+      "Update customer error:",
+      error.response?.data || error.message
+    );
+
+    res.status(500).json({
+      error: "Failed to update customer"
+    });
+
+  }
+});
+
+
+
+/*-------------------------------------------------
+    7. Update Vendor
+-------------------------------------------------*/
+
+app.patch("/fr/update-vendor", async (req, res) => {
+  try {
+
+    const accessToken = await getAccessToken();
+    const contact_id = req.body.contact_id;
+
+    if (!contact_id) {
+      return res.status(400).json({
+        error: "contact_id is required"
+      });
+    }
+
+    let updateData = {};
+
+    /* -------- GET EXISTING VENDOR -------- */
+
+    const existingContactResp = await axios.get(
+      `https://www.zohoapis.com/books/v3/contacts/${contact_id}`,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const existingContact = existingContactResp.data.contact;
+
+    const existingContactPerson =
+      existingContact.contact_persons &&
+      existingContact.contact_persons.length > 0
+        ? existingContact.contact_persons[0]
+        : null;
+
+    /* -------- OPTIONAL CURRENCY LOOKUP -------- */
+
+    if (req.body.currency) {
+
+      const currencyResp = await axios.get(
+        "https://www.zohoapis.com/books/v3/settings/currencies",
+        {
+          headers: {
+            Authorization: `Zoho-oauthtoken ${accessToken}`
+          },
+          params: {
+            organization_id: ZOHO_ORGANIZATION_ID
+          }
+        }
+      );
+
+      const currencies = currencyResp.data.currencies;
+
+      const currencyObj = currencies.find(
+        c => c.currency_code === req.body.currency
+      );
+
+      if (!currencyObj) {
+        return res.status(400).json({
+          error: `Currency ${req.body.currency} not found in Zoho`
+        });
+      }
+
+      updateData.currency_id = currencyObj.currency_id;
+    }
+
+    /* -------- OPTIONAL FIELDS -------- */
+
+    if (req.body.contact_name) {
+      updateData.contact_name = req.body.contact_name;
+    }
+
+    if (req.body.company_name) updateData.company_name = req.body.company_name;
+    if (req.body.tax_treatment) updateData.tax_treatment = req.body.tax_treatment;
+    if (req.body.place_of_contact) updateData.place_of_contact = req.body.place_of_contact;
+    if (req.body.tax_reg_no) updateData.tax_reg_no = req.body.tax_reg_no;
+    if (req.body.vat_reg_no) updateData.vat_reg_no = req.body.vat_reg_no;
+    if (req.body.country_code) updateData.country_code = req.body.country_code;
+
+    /* -------- PAYMENT TERMS -------- */
+
+    if (req.body.payment_terms) updateData.payment_terms = req.body.payment_terms;
+    if (req.body.payment_terms_label) updateData.payment_terms_label = req.body.payment_terms_label;
+
+    /* -------- BILLING ADDRESS -------- */
+
+    if (req.body.billing_address) {
+      updateData.billing_address = {
+        address: req.body.billing_address.address,
+        city: req.body.billing_address.city,
+        zip: req.body.billing_address.zip,
+        country: req.body.billing_address.country
+      };
+    }
+
+    /* -------- CONTACT PERSON SAFE UPDATE -------- */
+
+    if (
+      req.body.contact_name ||
+      req.body.email ||
+      req.body.phone
+    ) {
+
+      updateData.contact_persons = [
+        {
+          contact_person_id: existingContactPerson?.contact_person_id,
+
+          first_name:
+            req.body.contact_name ||
+            existingContactPerson?.first_name ||
+            "",
+
+          email:
+            req.body.email ||
+            existingContactPerson?.email ||
+            "",
+
+          phone:
+            req.body.phone ||
+            existingContactPerson?.phone ||
+            ""
+        }
+      ];
+    }
+
+    /* -------- UPDATE VENDOR -------- */
+
+    const response = await axios.put(
+      `https://www.zohoapis.com/books/v3/contacts/${contact_id}`,
+      updateData,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    res.json(response.data);
+
+  } catch (error) {
+
+    console.error(
+      "❌ Update vendor error:",
+      error.response?.data || error.message
+    );
+
+    res.status(500).json({
+      error: "Failed to update vendor"
+    });
+
+  }
+});
+
+
+
+/*-------------------------------------------------
+    8. Default GET 3000 API
+-------------------------------------------------*/
+app.get("/", (req, res) => {
+  res.send(`Zoho API server is running on Port:${process.env.PORT}`);
+});
+
+app.listen(process.env.PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${process.env.PORT}`);
+});

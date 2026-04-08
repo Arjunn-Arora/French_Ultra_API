@@ -1,0 +1,26 @@
+{
+  "name": "french_ultra_api",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "server": "nodemon index.js"
+  },
+  "keywords": [
+    "French",
+    "Ultra",
+    "Contact",
+    "Vendor",
+    "APIs"
+  ],
+  "author": "Arjun Arora",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "axios": "^1.14.0",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "nodemon": "^3.1.14"
+  }
+}

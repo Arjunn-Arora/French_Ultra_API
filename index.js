@@ -207,6 +207,447 @@ app.post("/fr/create-vendor", async (req, res) => {
   }
 });
 
+/*-------------------------------------------------
+    4. Create Invoice
+-------------------------------------------------*/
+
+app.post("/fr/create-invoice", async (req, res) => {
+  try {
+
+    const bubble_invoice_id = req.body.bubble_invoice_id;
+    const customer_id = req.body.customer_id;
+    const version = req.body.version || "live";
+
+    const accessToken = await getAccessToken();
+    const BASE_URL = version === "test" ? process.env.ULTRASTRATEGY_TEST_API_BASE : process.env.ULTRASTRATEGY_API_BASE;
+
+    /* ---------------- FETCH INVOICE ---------------- */
+
+    const invoiceResp = await axios.get(
+      `${BASE_URL}/obj/invoices/${bubble_invoice_id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ULTRASTRATEGY_API_KEY}`
+        }
+      }
+    );
+
+    const invoice = invoiceResp.data.response;
+
+    const projectId = invoice.project;
+    const timesheetMonth = invoice.TimesheetMonth;
+
+    /* ---------------- FETCH PROJECT ---------------- */
+
+    const projectResp = await axios.get(
+      `${BASE_URL}/obj/project/${projectId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ULTRASTRATEGY_API_KEY}`
+        }
+      }
+    );
+
+    const project = projectResp.data.response;
+
+    /* ---------------- TAX LOGIC ---------------- */
+
+const vatLineClient = project["VATline - Client"];
+let isReverseCharge = false;
+let tax_id = null;
+
+if (vatLineClient === "Yes") {
+
+  // ✅ EU B2B Reverse Charge
+  isReverseCharge = true;
+  tax_id = "7703978000000109088";
+
+} else {
+
+  // VATline = No
+  isReverseCharge = false;
+
+  const taxStatus = project["OS.TAX.status (client)"];
+  const vatPercentage = Number(project["VATpercentage (client)"]) || 0;
+
+  if (taxStatus === "VAT applicable") {
+
+    if (vatPercentage === 20) {
+      // ✅ Standard VAT (20%)
+      tax_id = "7703978000000109057";
+    } else {
+      // ✅ Zero Rated (0%)
+      tax_id = "7703978000000109136";
+    }
+
+  } else {
+
+    // ✅ No Tax → Zero Rated
+    tax_id = "7703978000000109136";
+
+  }
+}
+
+    /* ---------------- GET ZOHO ITEMS ---------------- */
+
+    const itemsResp = await axios.get(
+      "https://www.zohoapis.com/books/v3/items",
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: process.env.ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const itemMap = {};
+
+    itemsResp.data.items.forEach(i => {
+      itemMap[i.name.toLowerCase()] = i;
+    });
+
+    const DEFAULT_ITEM = itemsResp.data.items[0];
+
+    /* ---------------- PARSE LINE ITEMS ---------------- */
+
+    const rawItems = invoice["invoice_item_list - client"];
+
+    const line_items = rawItems.map(row => {
+
+      const [name, desc1, desc2, numbers] = row.split("|").map(s => s.trim());
+
+      const nums = numbers.split(":").filter(Boolean).map(Number);
+
+      const qty = nums[0] || 1;
+      const rate = nums[1] || 0;
+
+      const description = `${desc1} | ${desc2}`;
+
+      const zohoItem = itemMap[name.toLowerCase()] || DEFAULT_ITEM;
+
+      return {
+        name,
+        description,
+        quantity: qty,
+        rate,
+        ...( tax_id ? { tax_id } : {} )
+      };
+
+    });
+
+    /* ---------------- CREATE ZOHO INVOICE ---------------- */
+
+    const invoiceBody = {
+
+      customer_id,
+      invoice_number: invoice.invoice_number,
+      reference_number: invoice.invoice_number,
+      date: invoice.issue_date.split("T")[0],
+      due_date: invoice.due_date.split("T")[0],
+      currency_code: invoice["os.currency"],
+      line_items,
+      is_reverse_charge_applied: isReverseCharge,
+
+      custom_fields: [
+        {
+          customfield_id: "7703978000000117023",
+          value: bubble_invoice_id
+        }
+      ]
+    };
+
+    const createResp = await axios.post(
+      "https://www.zohoapis.com/books/v3/invoices",
+      invoiceBody,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: process.env.ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const zohoInvoiceId = createResp.data.invoice.invoice_id;
+
+    console.log("Invoice created:", invoice.invoice_number);
+
+    const invoiceType = invoice["OS.invoice.type"];
+
+    /* ---------------- ATTACHMENT ---------------- */
+
+    const fileResp = await axios.post(
+      "https://n8n.anqa.it/webhook/ea7f7d6d-e9bd-45fe-8612-e61e62b1fd98",
+      {
+        timesheetmonth: timesheetMonth,
+        type: invoiceType,
+        project: projectId,
+        version: version
+      },
+      {
+        responseType: "arraybuffer"
+      }
+    );
+
+    const formData = new FormData();
+
+    formData.append("attachment", fileResp.data, {
+      filename: `${invoice.invoice_number}.pdf`,
+      contentType: "application/pdf"
+    });
+
+    await axios.post(
+      `https://www.zohoapis.com/books/v3/invoices/${zohoInvoiceId}/attachment`,
+      formData,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`,
+          ...formData.getHeaders()
+        },
+        params: {
+          organization_id: process.env.ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    console.log("Attachment uploaded");
+
+    res.json({
+      success: true,
+      zoho_invoice_id: zohoInvoiceId
+    });
+
+  } catch (err) {
+
+    console.error(err.response?.data || err.message);
+
+    res.status(500).json({
+      error: "Invoice creation failed",
+      details: err.response?.data || err.message
+    });
+
+  }
+});
+
+
+/*-------------------------------------------------
+    5. Create Bill
+-------------------------------------------------*/
+
+app.post("/fr/create-bill", async (req, res) => {
+  try {
+
+    const bubble_invoice_id = req.body.bubble_invoice_id;
+    const vendor_id = req.body.vendor_id;
+    const version = req.body.version;
+
+    const accessToken = await getAccessToken();
+
+    const BASE_URL = version === "test" ? process.env.ULTRASTRATEGY_TEST_API_BASE : process.env.ULTRASTRATEGY_API_BASE;
+
+    /* ---------------- FETCH INVOICE ---------------- */
+
+    const invoiceResp = await axios.get(
+      `${BASE_URL}/obj/invoices/${bubble_invoice_id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ULTRASTRATEGY_API_KEY}`
+        }
+      }
+    );
+
+    const invoice = invoiceResp.data.response;
+
+    const projectId = invoice.project;
+    const timesheetMonth = invoice.TimesheetMonth;
+
+    /* ---------------- FETCH PROJECT ---------------- */
+
+    const projectResp = await axios.get(
+      `${BASE_URL}/obj/project/${projectId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.ULTRASTRATEGY_API_KEY}`
+        }
+      }
+    );
+
+    const project = projectResp.data.response;
+
+    /* ---------------- TAX LOGIC (CONSULTANT) ---------------- */
+
+let tax_id = null;
+let reverse_charge_tax_id = null;
+let is_reverse_charge_applied = false;
+
+const vatLineConsultant = project["VATline - Consultant"];
+
+// ===============================
+// 1. REVERSE CHARGE CASE
+// ===============================
+if (vatLineConsultant === "Yes") {
+
+  is_reverse_charge_applied = true;
+
+  // IMPORTANT: ONLY reverse charge tax
+  reverse_charge_tax_id = "7703978000000109088";
+
+  tax_id = null; // NEVER send normal tax
+
+}
+
+// ===============================
+// 2. NORMAL VAT / ZERO TAX CASE
+// ===============================
+else {
+
+  is_reverse_charge_applied = false;
+
+  const taxStatus = project["OS.Tax.Status. consultant"];
+  const vatPercentage = Number(project["VATpercentage (consultant)"]) || 0;
+
+  if (taxStatus === "VAT applicable") {
+
+    if (vatPercentage === 20) {
+      tax_id = "7703978000000109057"; // standard VAT
+    } else {
+      tax_id = "7703978000000109136"; // zero rated
+    }
+
+  } else {
+
+    tax_id = "7703978000000109136"; // default zero rated
+  }
+}
+
+    /* ---------------- PARSE CONSULTANT LINE ITEMS ---------------- */
+
+    let rawItems = invoice["invoice_item_list - consultant"];
+
+    if (!Array.isArray(rawItems)) {
+      rawItems = [rawItems];
+    }
+
+    const line_items = rawItems.map(row => {
+
+      const [name, desc1, desc2, numbers] = row.split("|").map(s => s.trim());
+
+      const nums = numbers.split(":").filter(Boolean).map(Number);
+
+      const qty = nums[0] || 1;
+      const rate = nums[1] || 0;
+
+      const description = `${name} | ${desc1} | ${desc2}`;
+
+      return {
+        account_id: "7703978000000034003", // Expense account
+        description,
+        quantity: qty,
+        rate,
+        ...(tax_id && { tax_id }),
+        ...(reverse_charge_tax_id && { reverse_charge_tax_id })
+      };
+
+    });
+
+    /* ---------------- CREATE ZOHO BILL ---------------- */
+
+    const billBody = {
+
+      vendor_id,
+      bill_number: invoice.invoice_number,
+      reference_number: invoice.invoice_number,
+      date: invoice.issue_date.split("T")[0],
+      due_date: invoice.due_date.split("T")[0],
+      currency_code: invoice["os.currency"] || "USD",
+      line_items,
+      is_reverse_charge_applied,
+      custom_fields: [
+        {
+          customfield_id: "7703978000000117027",
+          value: bubble_invoice_id
+        }
+      ]
+
+    };
+
+    const createResp = await axios.post(
+      "https://www.zohoapis.com/books/v3/bills",
+      billBody,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`
+        },
+        params: {
+          organization_id: process.env.ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    const zohoBillId = createResp.data.bill.bill_id;
+
+    console.log("Bill created:", invoice.invoice_number);
+
+    const invoiceType = invoice["OS.invoice.type"];
+
+    /* ---------------- ATTACHMENT ---------------- */
+
+    const fileResp = await axios.post(
+      "https://n8n.anqa.it/webhook/ea7f7d6d-e9bd-45fe-8612-e61e62b1fd98",
+      {
+        timesheetmonth: timesheetMonth,
+        type: invoiceType,
+        project: projectId,
+        version: version
+      },
+      {
+        responseType: "arraybuffer"
+      }
+    );
+
+    const formData = new FormData();
+
+    formData.append("attachment", fileResp.data, {
+      filename: `${invoice.invoice_number}.pdf`,
+      contentType: "application/pdf"
+    });
+
+    await axios.post(
+      `https://www.zohoapis.com/books/v3/bills/${zohoBillId}/attachment`,
+      formData,
+      {
+        headers: {
+          Authorization: `Zoho-oauthtoken ${accessToken}`,
+          ...formData.getHeaders()
+        },
+        params: {
+          organization_id: process.env.ZOHO_ORGANIZATION_ID
+        }
+      }
+    );
+
+    console.log("Bill attachment uploaded");
+
+    res.json({
+      success: true,
+      zoho_bill_id: zohoBillId
+    });
+
+  } catch (err) {
+
+    console.error(err.response?.data || err.message);
+
+    res.status(500).json({
+      error: "Bill creation failed",
+      details: err.response?.data || err.message
+    });
+
+  }
+});
+
 
 /*-------------------------------------------------
     6. Update Customer

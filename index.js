@@ -89,6 +89,7 @@ app.post("/fr/create-customer", async (req, res) => {
         payment_terms: payment_terms, // No. of Days
         payment_terms_label: payment_terms_label, // Name of Payment Terms
         place_of_contact: req.body.place_of_contact,
+        company_id: req.body.company_id,
         tax_reg_no: req.body.tax_reg_no,
         vat_reg_no: req.body.vat_reg_no,
         billing_address: {
@@ -170,6 +171,7 @@ app.post("/fr/create-vendor", async (req, res) => {
         currency_id: currency_id,
         payment_terms: payment_terms,
         payment_terms_label: payment_terms_label,
+        company_id: req.body.company_id,
         tax_treatment: req.body.tax_treatment,
         place_of_contact: req.body.place_of_contact,
         tax_reg_no: req.body.tax_reg_no,
@@ -249,6 +251,7 @@ app.post("/fr/create-invoice", async (req, res) => {
     );
 
     const project = projectResp.data.response;
+    const projectCode = project.ProjectCode;
 
     /* ---------------- TAX LOGIC ---------------- */
 
@@ -343,7 +346,8 @@ if (vatLineClient === "Yes") {
 
       customer_id,
       invoice_number: invoice.invoice_number,
-      reference_number: invoice.invoice_number,
+      reference_number: project.purchase_order_number_new || invoice.invoice_number,
+      subject_content: projectCode || invoice.invoice_number,
       date: invoice.issue_date.split("T")[0],
       due_date: invoice.due_date.split("T")[0],
       currency_code: invoice["os.currency"],
@@ -415,9 +419,43 @@ if (vatLineClient === "Yes") {
 
     console.log("Attachment uploaded");
 
+        /* ---------------- MARK AS SENT ---------------- */
+
+await axios.post(
+  `https://www.zohoapis.com/books/v3/invoices/${zohoInvoiceId}/status/sent`,
+  {},
+  {
+    headers: {
+      Authorization: `Zoho-oauthtoken ${accessToken}`
+    },
+    params: {
+      organization_id: process.env.ZOHO_ORGANIZATION_ID
+    }
+  }
+);
+
+console.log("Invoice marked as sent");
+
+/* ---------------- GET CUSTOMER EMAIL ---------------- */
+
+const customerResp = await axios.get(
+  `https://www.zohoapis.com/books/v3/contacts/${customer_id}`,
+  {
+    headers: {
+      Authorization: `Zoho-oauthtoken ${accessToken}`
+    },
+    params: {
+      organization_id: process.env.ZOHO_ORGANIZATION_ID
+    }
+  }
+);
+
+const customerEmail = customerResp.data.contact.email || null;
+
     res.json({
       success: true,
-      zoho_invoice_id: zohoInvoiceId
+      zoho_invoice_id: zohoInvoiceId,
+      customer_email: customerEmail
     });
 
   } catch (err) {

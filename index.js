@@ -677,6 +677,47 @@ else {
 
     console.log("Bill attachment uploaded");
 
+    /* ---------------- UPDATE CUSTOM FIELDS (EMAILS) ---------------- */
+
+const emailRecipients = req.body.email_recipients || [];
+
+const customFieldsToUpdate = [];
+
+if (emailRecipients[0]) {
+  customFieldsToUpdate.push({
+    customfield_id: "7703978000000241001",
+    value: emailRecipients[0]
+  });
+}
+
+if (emailRecipients[1]) {
+  customFieldsToUpdate.push({
+    customfield_id: "7703978000000241003",
+    value: emailRecipients[1]
+  });
+}
+
+if (customFieldsToUpdate.length > 0) {
+
+  await axios.put(
+    `https://www.zohoapis.com/books/v3/bills/${zohoBillId}`,
+    {
+      custom_fields: customFieldsToUpdate
+    },
+    {
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`
+      },
+      params: {
+        organization_id: process.env.ZOHO_ORGANIZATION_ID
+      }
+    }
+  );
+
+  console.log("Bill custom fields updated");
+
+}
+
     res.json({
       success: true,
       zoho_bill_id: zohoBillId

@@ -436,26 +436,34 @@ await axios.post(
 
 console.log("Invoice marked as sent");
 
-/* ---------------- GET CUSTOMER EMAIL ---------------- */
+/* ---------------- SEND EMAIL ---------------- */
 
-const customerResp = await axios.get(
-  `https://www.zohoapis.com/books/v3/contacts/${customer_id}`,
-  {
-    headers: {
-      Authorization: `Zoho-oauthtoken ${accessToken}`
+const emailRecipients = req.body.email_recipients || [];
+
+if (emailRecipients.length > 0) {
+
+  await axios.post(
+    `https://www.zohoapis.com/books/v3/invoices/${zohoInvoiceId}/email`,
+    {
+      to_mail_ids: emailRecipients
     },
-    params: {
-      organization_id: process.env.ZOHO_ORGANIZATION_ID
+    {
+      headers: {
+        Authorization: `Zoho-oauthtoken ${accessToken}`
+      },
+      params: {
+        organization_id: process.env.ZOHO_ORGANIZATION_ID
+      }
     }
-  }
-);
+  );
 
-const customerEmail = customerResp.data.contact.email || null;
+  console.log("Invoice email sent");
+
+}
 
     res.json({
       success: true,
-      zoho_invoice_id: zohoInvoiceId,
-      customer_email: customerEmail
+      zoho_invoice_id: zohoInvoiceId
     });
 
   } catch (err) {

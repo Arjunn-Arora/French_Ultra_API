@@ -255,7 +255,7 @@ app.post("/fr/create-invoice", async (req, res) => {
 
     /* ---------------- TAX LOGIC ---------------- */
 
-const vatLineClient = project["VATline - Client"];
+const vatLineClient = project["OS.VATline - Client"];
 let isReverseCharge = false;
 let tax_id = null;
 
@@ -445,7 +445,8 @@ if (emailRecipients.length > 0) {
   await axios.post(
     `https://www.zohoapis.com/books/v3/invoices/${zohoInvoiceId}/email`,
     {
-      to_mail_ids: emailRecipients
+      to_mail_ids: emailRecipients,
+      send_attachment: true
     },
     {
       headers: {

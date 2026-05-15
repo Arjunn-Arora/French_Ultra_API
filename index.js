@@ -423,7 +423,9 @@ if (vatLineClient === "Yes") {
 
 await axios.post(
   `https://www.zohoapis.com/books/v3/invoices/${zohoInvoiceId}/status/sent`,
-  {},
+  {
+    can_send_in_mail: true
+  },
   {
     headers: {
       Authorization: `Zoho-oauthtoken ${accessToken}`
